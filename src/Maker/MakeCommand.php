@@ -18,13 +18,16 @@ use Symfony\Bundle\MakerBundle\InputConfiguration;
 use Symfony\Bundle\MakerBundle\Str;
 use Symfony\Bundle\MakerBundle\Util\PhpCompatUtil;
 use Symfony\Bundle\MakerBundle\Util\UseStatementGenerator;
+use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
+use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Command\LazyCommand;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Question\ConfirmationQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
@@ -58,8 +61,21 @@ final class MakeCommand extends AbstractMaker
     {
         $command
             ->addArgument('name', InputArgument::OPTIONAL, \sprintf('Choose a command name (e.g. <fg=yellow>app:%s</>)', Str::asCommand(Str::getRandomTerm())))
+            ->addOption('old-structure', null, InputOption::VALUE_NONE, 'Generate the command with the old structure (configure and execute method) instead of an invokable command?')
             ->setHelp($this->getHelpFileContents('MakeCommand.txt'))
         ;
+    }
+
+    public function interact(InputInterface $input, ConsoleStyle $io, Command $command): void
+    {
+        if (!$input->getOption('old-structure'))
+        {
+            $description = $command->getDefinition()->getOption('old-structure')->getDescription();
+            $question = new ConfirmationQuestion($description, false);
+            $isUsingOldStructure = $io->askQuestion($question);
+
+            $input->setOption('old-structure', $isUsingOldStructure);
+        }
     }
 
     public function generate(InputInterface $input, ConsoleStyle $io, Generator $generator): void
@@ -74,25 +90,45 @@ final class MakeCommand extends AbstractMaker
             \sprintf('The "%s" command name is not valid because it would be implemented by "%s" class, which is not valid as a PHP class name (it must start with a letter or underscore, followed by any number of letters, numbers, or underscores).', $commandName, Str::asClassName($commandName, 'Command'))
         );
 
-        $useStatements = new UseStatementGenerator([
-            Command::class,
-            InputArgument::class,
-            InputInterface::class,
-            InputOption::class,
-            OutputInterface::class,
-            SymfonyStyle::class,
-            AsCommand::class,
-        ]);
+        if ($input->getOption('old-structure')) {
+            $useStatements = new UseStatementGenerator([
+                Command::class,
+                InputArgument::class,
+                InputInterface::class,
+                InputOption::class,
+                OutputInterface::class,
+                SymfonyStyle::class,
+                AsCommand::class,
+            ]);
 
-        $generator->generateClass(
-            $commandClassNameDetails->getFullName(),
-            'command/Command.tpl.php',
-            [
-                'use_statements' => $useStatements,
-                'command_name' => $commandName,
-                'set_description' => !class_exists(LazyCommand::class),
-            ]
-        );
+            $generator->generateClass(
+                $commandClassNameDetails->getFullName(),
+                'command/Command.tpl.php',
+                [
+                    'use_statements' => $useStatements,
+                    'command_name' => $commandName,
+                    'set_description' => !class_exists(LazyCommand::class),
+                ]
+            );
+
+        } else {
+            $useStatements = new UseStatementGenerator([
+                Command::class,
+                SymfonyStyle::class,
+                AsCommand::class,
+                Argument::class,
+                Option::class,
+            ]);
+
+            $generator->generateClass(
+                $commandClassNameDetails->getFullName(),
+                'command/InvokableCommand.tpl.php',
+                [
+                    'use_statements' => $useStatements,
+                    'command_name' => $commandName,
+                ]
+            );
+        }
 
         $generator->writeChanges();
 
